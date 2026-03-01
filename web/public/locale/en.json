@@ -143,6 +143,17 @@
             },
             "hint": "When a channel fails consecutively up to the threshold, circuit breaker trips. Cooldown grows exponentially up to the max cooldown"
         },
+        "retryMechanism": {
+            "title": "Retry Mechanism",
+            "enabled": {
+                "label": "Enable Empty Response Retry"
+            },
+            "maxRetries": {
+                "label": "Max Same-Channel Retries",
+                "placeholder": "Enter max retries"
+            },
+            "hint": "When upstream returns an empty response (HTTP 200 but no content), retry on the same channel before switching to the next one"
+        },
         "saved": "Saved",
         "backup": {
             "title": "Backup / Restore",

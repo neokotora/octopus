@@ -687,6 +687,33 @@ func (r *InternalLLMResponse) IsChatResponse() bool {
 	return len(r.Choices) > 0
 }
 
+// IsEmptyResponse returns true when the response is a chat response but contains
+// no meaningful content: no text, no tool calls, and no reasoning content in any choice.
+func (r *InternalLLMResponse) IsEmptyResponse() bool {
+	if r.IsEmbeddingResponse() {
+		return false
+	}
+	if len(r.Choices) == 0 {
+		return true
+	}
+	for _, choice := range r.Choices {
+		msg := choice.Message
+		if msg == nil {
+			continue
+		}
+		if msg.Content.Content != nil && *msg.Content.Content != "" {
+			return false
+		}
+		if len(msg.ToolCalls) > 0 {
+			return false
+		}
+		if msg.ReasoningContent != nil && *msg.ReasoningContent != "" {
+			return false
+		}
+	}
+	return true
+}
+
 // Choice represents a choice in the response.
 // Choice represents a choice in the response.
 type Choice struct {
