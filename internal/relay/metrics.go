@@ -92,12 +92,12 @@ func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attemp
 		globalStats.RequestFailed = 1
 	}
 
+	channelID, channelName := finalChannel(attempts)
 	op.StatsTotalUpdate(globalStats)
 	op.StatsHourlyUpdate(globalStats)
 	op.StatsDailyUpdate(context.Background(), globalStats)
 	op.StatsAPIKeyUpdate(m.APIKeyID, globalStats)
-
-	channelID, channelName := finalChannel(attempts)
+	op.StatsChannelUpdate(channelID, globalStats)
 
 	// 补充 Channel 维度的 token/cost 统计（WaitTime 和请求计数已在 attempt() 中传入）
 	if channelID != 0 {

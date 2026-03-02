@@ -19,6 +19,8 @@ const (
 	SettingKeyCircuitBreakerThreshold   SettingKey = "circuit_breaker_threshold"    // 熔断触发阈值（连续失败次数）
 	SettingKeyCircuitBreakerCooldown    SettingKey = "circuit_breaker_cooldown"     // 熔断基础冷却时间（秒）
 	SettingKeyCircuitBreakerMaxCooldown SettingKey = "circuit_breaker_max_cooldown" // 熔断最大冷却时间（秒），指数退避上限
+	SettingKeyRetryOnEmptyEnabled      SettingKey = "retry_on_empty_enabled"       // 是否启用空响应重试
+	SettingKeyRetryOnEmptyMax          SettingKey = "retry_on_empty_max"           // 同渠道空响应最大重试次数
 )
 
 type Setting struct {
@@ -38,13 +40,16 @@ func DefaultSettings() []Setting {
 		{Key: SettingKeyCircuitBreakerThreshold, Value: "5"},     // 默认连续失败5次触发熔断
 		{Key: SettingKeyCircuitBreakerCooldown, Value: "60"},     // 默认基础冷却60秒
 		{Key: SettingKeyCircuitBreakerMaxCooldown, Value: "600"}, // 默认最大冷却600秒（10分钟）
+		{Key: SettingKeyRetryOnEmptyEnabled, Value: "false"},       // 默认不启用空响应重试
+		{Key: SettingKeyRetryOnEmptyMax, Value: "1"},               // 默认同渠道重试1次
 	}
 }
 
 func (s *Setting) Validate() error {
 	switch s.Key {
 	case SettingKeyModelInfoUpdateInterval, SettingKeySyncLLMInterval, SettingKeyRelayLogKeepPeriod,
-		SettingKeyCircuitBreakerThreshold, SettingKeyCircuitBreakerCooldown, SettingKeyCircuitBreakerMaxCooldown:
+		SettingKeyCircuitBreakerThreshold, SettingKeyCircuitBreakerCooldown, SettingKeyCircuitBreakerMaxCooldown,
+		SettingKeyRetryOnEmptyMax:
 		_, err := strconv.Atoi(s.Value)
 		if err != nil {
 			return fmt.Errorf("model info update interval must be an integer")
@@ -53,6 +58,11 @@ func (s *Setting) Validate() error {
 	case SettingKeyRelayLogKeepEnabled:
 		if s.Value != "true" && s.Value != "false" {
 			return fmt.Errorf("relay log keep enabled must be true or false")
+		}
+		return nil
+	case SettingKeyRetryOnEmptyEnabled:
+		if s.Value != "true" && s.Value != "false" {
+			return fmt.Errorf("retry on empty enabled must be true or false")
 		}
 		return nil
 	case SettingKeyProxyURL:
@@ -64,12 +74,12 @@ func (s *Setting) Validate() error {
 			return fmt.Errorf("proxy URL is invalid: %w", err)
 		}
 		validSchemes := map[string]bool{
-			"http":  true,
-			"https": true,
-			"socks": true,
+			"http":   true,
+			"https":  true,
+			"socks5": true,
 		}
 		if !validSchemes[parsedURL.Scheme] {
-			return fmt.Errorf("proxy URL scheme must be http, https, or socks")
+			return fmt.Errorf("proxy URL scheme must be http, https, socks, or socks5")
 		}
 		if parsedURL.Host == "" {
 			return fmt.Errorf("proxy URL must have a host")

@@ -273,7 +273,100 @@ func (r *InternalLLMRequest) Validate() error {
 		return errors.New("messages are required")
 	}
 
+	if isChatRequest {
+		r.fillMissingToolCallIDsFromToolMessages()
+		// r.fillMissingToolCallIDs()
+	}
+
 	return nil
+}
+
+func (r *InternalLLMRequest) fillMissingToolCallIDs() {
+	usedIDs := make(map[string]struct{})
+	for _, msg := range r.Messages {
+		for _, tc := range msg.ToolCalls {
+			if tc.ID == "" {
+				continue
+			}
+			usedIDs[tc.ID] = struct{}{}
+		}
+	}
+
+	sequence := 0
+	for messageIndex := range r.Messages {
+		for toolCallIndex := range r.Messages[messageIndex].ToolCalls {
+			toolCall := &r.Messages[messageIndex].ToolCalls[toolCallIndex]
+			if toolCall.ID != "" {
+				continue
+			}
+
+			candidate := fmt.Sprintf("call_octopus_%d_%d", messageIndex, toolCallIndex)
+			if _, exists := usedIDs[candidate]; exists {
+				for {
+					candidate = fmt.Sprintf("call_octopus_%d", sequence)
+					sequence++
+					if _, conflict := usedIDs[candidate]; !conflict {
+						break
+					}
+				}
+			}
+
+			toolCall.ID = candidate
+			usedIDs[candidate] = struct{}{}
+		}
+	}
+}
+
+
+func (r *InternalLLMRequest) fillMissingToolCallIDsFromToolMessages() {
+	for msgIndex := 0; msgIndex < len(r.Messages); msgIndex++ {
+		msg := &r.Messages[msgIndex]
+		if msg.Role != "assistant" || len(msg.ToolCalls) == 0 {
+			continue
+		}
+
+		candidates := make([]string, 0, len(msg.ToolCalls))
+		for nextIndex := msgIndex + 1; nextIndex < len(r.Messages); nextIndex++ {
+			nextMsg := r.Messages[nextIndex]
+			if nextMsg.Role != "tool" {
+				break
+			}
+			if nextMsg.ToolCallID == nil || *nextMsg.ToolCallID == "" {
+				continue
+			}
+			candidates = append(candidates, *nextMsg.ToolCallID)
+		}
+
+		if len(candidates) == 0 {
+			continue
+		}
+
+		used := make(map[string]struct{})
+		for _, toolCall := range msg.ToolCalls {
+			if toolCall.ID == "" {
+				continue
+			}
+			used[toolCall.ID] = struct{}{}
+		}
+
+		candidateIndex := 0
+		for toolCallIndex := range msg.ToolCalls {
+			if msg.ToolCalls[toolCallIndex].ID != "" {
+				continue
+			}
+
+			for candidateIndex < len(candidates) {
+				candidate := candidates[candidateIndex]
+				candidateIndex++
+				if _, exists := used[candidate]; exists {
+					continue
+				}
+				msg.ToolCalls[toolCallIndex].ID = candidate
+				used[candidate] = struct{}{}
+				break
+			}
+		}
+	}
 }
 
 // IsEmbeddingRequest returns true if this is an embedding request.
@@ -592,6 +685,33 @@ func (r *InternalLLMResponse) IsEmbeddingResponse() bool {
 // IsChatResponse returns true if this is a chat completion response.
 func (r *InternalLLMResponse) IsChatResponse() bool {
 	return len(r.Choices) > 0
+}
+
+// IsEmptyResponse returns true when the response is a chat response but contains
+// no meaningful content: no text, no tool calls, and no reasoning content in any choice.
+func (r *InternalLLMResponse) IsEmptyResponse() bool {
+	if r.IsEmbeddingResponse() {
+		return false
+	}
+	if len(r.Choices) == 0 {
+		return true
+	}
+	for _, choice := range r.Choices {
+		msg := choice.Message
+		if msg == nil {
+			continue
+		}
+		if msg.Content.Content != nil && *msg.Content.Content != "" {
+			return false
+		}
+		if len(msg.ToolCalls) > 0 {
+			return false
+		}
+		if msg.ReasoningContent != nil && *msg.ReasoningContent != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // Choice represents a choice in the response.

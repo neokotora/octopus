@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/tmaxmax/go-sse"
 )
+
+var errEmptyResponse = errors.New("empty response from upstream")
 
 // Handler 处理入站请求并转发到上游服务
 func Handler(inboundType inbound.InboundType, c *gin.Context) {
@@ -160,8 +163,24 @@ func Handler(inboundType inbound.InboundType, c *gin.Context) {
 func (ra *relayAttempt) attempt() attemptResult {
 	span := ra.iter.StartAttempt(ra.channel.ID, ra.usedKey.ID, ra.channel.Name)
 
-	// 转发请求
-	statusCode, fwdErr := ra.forward()
+	maxRetries := 0
+	if enabled, _ := op.SettingGetBool(dbmodel.SettingKeyRetryOnEmptyEnabled); enabled {
+		maxRetries, _ = op.SettingGetInt(dbmodel.SettingKeyRetryOnEmptyMax)
+	}
+
+	var statusCode int
+	var fwdErr error
+
+	for retryCount := 0; retryCount <= maxRetries; retryCount++ {
+		if retryCount > 0 {
+			log.Infof("empty response retry on same channel %s (retry %d/%d)",
+				ra.channel.Name, retryCount, maxRetries)
+		}
+		statusCode, fwdErr = ra.forward()
+		if fwdErr == nil || !errors.Is(fwdErr, errEmptyResponse) {
+			break
+		}
+	}
 
 	// 更新 channel key 状态
 	ra.usedKey.StatusCode = statusCode
@@ -376,6 +395,13 @@ func (ra *relayAttempt) handleStreamResponse(ctx context.Context, response *http
 			return fmt.Errorf("first token timeout (%ds)", ra.firstTokenTimeOutSec)
 		case r, ok := <-results:
 			if !ok {
+				if firstToken {
+					// Stream ended without any content
+					if enabled, _ := op.SettingGetBool(dbmodel.SettingKeyRetryOnEmptyEnabled); enabled {
+						log.Warnf("empty stream detected, will retry")
+						return errEmptyResponse
+					}
+				}
 				log.Infof("stream end")
 				return nil
 			}
@@ -435,6 +461,14 @@ func (ra *relayAttempt) handleResponse(ctx context.Context, response *http.Respo
 	if err != nil {
 		log.Warnf("failed to transform response: %v", err)
 		return fmt.Errorf("failed to transform outbound response: %w", err)
+	}
+
+	// Empty response check (before writing to client)
+	if internalResponse.IsEmptyResponse() {
+		if enabled, _ := op.SettingGetBool(dbmodel.SettingKeyRetryOnEmptyEnabled); enabled {
+			log.Warnf("empty response detected, will retry")
+			return errEmptyResponse
+		}
 	}
 
 	inResponse, err := ra.inAdapter.TransformResponse(ctx, internalResponse)
