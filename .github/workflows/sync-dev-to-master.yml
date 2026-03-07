@@ -1,0 +1,60 @@
+name: sync-dev-to-master
+
+on:
+  push:
+    branches:
+      - dev
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-dev-to-master
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    name: Fast-forward dev into master
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: dev
+
+      - name: Ensure ACTION_TOKEN exists
+        env:
+          ACTION_TOKEN: ${{ secrets.ACTION_TOKEN }}
+        run: |
+          if [ -z "$ACTION_TOKEN" ]; then
+            echo "::error::Missing ACTION_TOKEN secret. Add a PAT with repo scope to allow push and trigger downstream workflows."
+            exit 1
+          fi
+
+      - name: Configure git identity
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "github-actions@github.com"
+
+      - name: Fast-forward master to dev
+        run: |
+          git fetch origin master dev
+          git checkout -B master origin/master
+          git merge --ff-only origin/dev
+
+      - name: Push updated master
+        env:
+          ACTION_TOKEN: ${{ secrets.ACTION_TOKEN }}
+        run: |
+          git remote set-url origin https://x-access-token:${ACTION_TOKEN}@github.com/${{ github.repository }}
+          git push origin master
+
+      - name: Failure summary
+        if: failure()
+        run: |
+          {
+            echo "### dev -> master 同步失败"
+            echo "- 仅允许 fast-forward，同步失败代表 master 与 dev 出现分叉或权限不足。"
+            echo "- 请先手动处理分支分叉，或检查 ACTION_TOKEN 权限后重试。"
+          } >> "$GITHUB_STEP_SUMMARY"
