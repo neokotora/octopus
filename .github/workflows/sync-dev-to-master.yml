@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   sync:
-    name: Fast-forward dev into master
+    name: Merge dev into master
     runs-on: ubuntu-latest
     steps:
       - name: Checkout dev
@@ -37,11 +37,15 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "github-actions@github.com"
 
-      - name: Fast-forward master to dev
+      - name: Merge dev into master
         run: |
           git fetch origin master dev
           git checkout -B master origin/master
-          git merge --ff-only origin/dev
+          if ! git merge --no-ff --no-edit -X theirs origin/dev; then
+            git checkout --theirs .
+            git add -A
+            git commit --no-edit
+          fi
 
       - name: Push updated master
         env:
@@ -55,6 +59,6 @@ jobs:
         run: |
           {
             echo "### dev -> master 同步失败"
-            echo "- 仅允许 fast-forward，同步失败代表 master 与 dev 出现分叉或权限不足。"
-            echo "- 请先手动处理分支分叉，或检查 ACTION_TOKEN 权限后重试。"
+            echo "- 自动合并 origin/dev 到 origin/master 失败，可能是代码冲突或权限不足。"
+            echo "- 请先手动解决冲突，或检查 ACTION_TOKEN 权限后重试。"
           } >> "$GITHUB_STEP_SUMMARY"
