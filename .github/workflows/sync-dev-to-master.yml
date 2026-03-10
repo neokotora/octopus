@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   sync:
-    name: Fast-forward dev into master
+    name: Merge dev into master
     runs-on: ubuntu-latest
     steps:
       - name: Checkout dev
@@ -41,7 +41,11 @@ jobs:
         run: |
           git fetch origin master dev
           git checkout -B master origin/master
-          git merge --no-ff --no-edit origin/dev
+          if ! git merge --no-ff --no-edit -X theirs origin/dev; then
+            git checkout --theirs .
+            git add -A
+            git commit --no-edit
+          fi
 
       - name: Push updated master
         env:
